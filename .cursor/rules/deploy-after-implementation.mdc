@@ -1,0 +1,29 @@
+---
+description: Rebuild services after code changes so edits are visible locally
+alwaysApply: true
+---
+
+# Deploy after each implementation
+
+When you finish an implementation that affects how the app runs locally, **do not stop at merging code only**. After **each substantive change** (or batch of related edits), rebuild what you touched so the user always sees compiled output:
+
+1. **Backend (API)** — whenever Python, Dockerfile, or `docker-compose.yml` for `api` changes  
+   From the repo root run:
+   `docker compose up -d --build api`  
+   so the `api` image is rebuilt and the container recreated.
+
+2. **Frontend (Next.js)** — whenever `frontend/` app code, styles, or `next.config` changes  
+   From `frontend/` run:
+   `npm run build`  
+   so TypeScript and the production bundle are validated and `.next` reflects the latest code. (Dev: `npm run dev` still hot-reloads, but **always run `npm run build` after changes** as part of the same task unless the user asked to skip.)
+
+3. **Database migrations**  
+   If Alembic migrations were added or changed, run them in the API container per project docs (e.g. `docker compose exec api alembic upgrade head`).
+
+4. **Background `npm run dev`**  
+   If a dev server is already running, restart it when env or `next.config` changes (free port 3000/3001, then `npm run dev` from `frontend/` with `NEXT_PUBLIC_API_BASE_URL` per README). **Always start dev from the `frontend/` directory** so Next resolves assets correctly.
+
+5. **Unstyled / plaintext dashboard**  
+   If the app loads with HTML but no Tailwind styling, delete `frontend/.next`, run `npm run build`, then restart `npm run dev` — usually a stale or mixed `.next` cache where `/_next/static/css/app/layout.css` was 404.
+
+Do this **as part of the same task** after substantive edits unless the user explicitly asks to skip rebuilds.
