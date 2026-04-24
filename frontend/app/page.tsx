@@ -54,6 +54,8 @@ type MovementRow = {
 };
 
 type DashboardPhase = "pre" | "live" | "post";
+const DAY2_LAST_OVERALL = 102;
+const FULL_DRAFT_PICKS = 257;
 
 function normalizeNameKey(name: string | null | undefined): string {
   return String(name ?? "")
@@ -61,6 +63,15 @@ function normalizeNameKey(name: string | null | undefined): string {
     .replace(/[^a-z0-9 ]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function coverageCellTone(sampleSize: number, maxSampleSize: number): string {
+  if (maxSampleSize <= 0 || sampleSize <= 0) return "bg-slate-800 text-slate-300";
+  const ratio = sampleSize / maxSampleSize;
+  if (ratio >= 0.75) return "bg-emerald-500/80 text-emerald-50";
+  if (ratio >= 0.5) return "bg-cyan-500/75 text-cyan-50";
+  if (ratio >= 0.25) return "bg-amber-500/75 text-amber-50";
+  return "bg-rose-500/75 text-rose-50";
 }
 
 type LiveAccuracySnapshot = {
@@ -133,6 +144,16 @@ export default function DashboardPage() {
   const teamYearKeyRef = useRef<string | null>(null);
   const prevBoardRef = useRef<LiveDraftBoardResponse | null>(null);
 
+  const focusPickInDashboard = (overallPick: number, playerName: string) => {
+    setPick(overallPick);
+    setLandingFocusPlayer(playerName);
+    setLandingFocusPick(overallPick);
+    const draftOrderTeam = draftOrder?.picks.find((p) => p.overall_pick === overallPick)?.team_abbreviation;
+    if (draftOrderTeam) {
+      setTeam(String(draftOrderTeam).toUpperCase());
+    }
+  };
+
   useEffect(() => {
     if (!landingFocusPlayer) {
       setLandingFocusData(null);
@@ -173,7 +194,7 @@ export default function DashboardPage() {
         if (teamYearKeyRef.current !== key) {
           teamYearKeyRef.current = key;
           try {
-            const ord = await getDraftOrder(draftYear, { team });
+            const ord = await getDraftOrder(draftYear, { team, maxOverall: FULL_DRAFT_PICKS });
             setDraftOrder(ord);
             const next = ord.next_overall_pick;
             if (next != null) {
@@ -193,7 +214,7 @@ export default function DashboardPage() {
           }
         } else if (!draftOrder) {
           try {
-            const ord = await getDraftOrder(draftYear, { team });
+            const ord = await getDraftOrder(draftYear, { team, maxOverall: FULL_DRAFT_PICKS });
             setDraftOrder(ord);
           } catch {
             /* draft order is optional for non-live usage */
@@ -202,7 +223,8 @@ export default function DashboardPage() {
 
         const ladderTopN = 50;
         const boardOpts = { topN: ladderTopN, boardAware: trackLiveDraft };
-        const overallPromises = Array.from({ length: 32 }, (_, idx) =>
+        const ladderPickLimit = DAY2_LAST_OVERALL;
+        const overallPromises = Array.from({ length: ladderPickLimit }, (_, idx) =>
           getPickConsensus(draftYear, idx + 1, boardOpts)
         );
         const overallResults = await Promise.allSettled(overallPromises);
@@ -228,7 +250,9 @@ export default function DashboardPage() {
           getPickPlayerProbs(team, pickForApis, draftYear, [], { boardAware: trackLiveDraft }),
           getCompareWithConsensus(team, pickForApis, draftYear, { boardAware: trackLiveDraft }),
           getModelMetadata(),
-          trackLiveDraft ? getLiveDraftBoard(draftYear, { sync: true }) : Promise.resolve(null),
+          trackLiveDraft
+            ? getLiveDraftBoard(draftYear, { sync: true, maxOverall: FULL_DRAFT_PICKS })
+            : Promise.resolve(null),
         ]);
         const [
           pickResult,
@@ -309,7 +333,7 @@ export default function DashboardPage() {
     let cancelled = false;
     const syncPickFromOrder = async () => {
       try {
-        const ord = await getDraftOrder(draftYear, { team });
+        const ord = await getDraftOrder(draftYear, { team, maxOverall: FULL_DRAFT_PICKS });
         if (cancelled) return;
         const next = ord.next_overall_pick;
         if (next != null) {
@@ -333,7 +357,9 @@ export default function DashboardPage() {
     }
     const completed = liveBoard.picks.filter((p) => Boolean(p.actual_player_name));
     const latestOverall = completed.length ? Math.max(...completed.map((p) => p.overall_pick)) : 0;
-    const onClockOverall = Math.min(32, latestOverall + 1);
+    const maxBoardOverall =
+      liveBoard.picks.length > 0 ? Math.max(...liveBoard.picks.map((p) => p.overall_pick)) : FULL_DRAFT_PICKS;
+    const onClockOverall = Math.min(maxBoardOverall, latestOverall + 1);
     let cancelled = false;
     const loadOnClockConsensus = async () => {
       try {
@@ -360,7 +386,9 @@ export default function DashboardPage() {
     }
     const completed = liveBoard.picks.filter((p) => Boolean(p.actual_player_name));
     const latestOverall = completed.length ? Math.max(...completed.map((p) => p.overall_pick)) : 0;
-    const onClockOverall = Math.min(32, latestOverall + 1);
+    const maxBoardOverall =
+      liveBoard.picks.length > 0 ? Math.max(...liveBoard.picks.map((p) => p.overall_pick)) : FULL_DRAFT_PICKS;
+    const onClockOverall = Math.min(maxBoardOverall, latestOverall + 1);
     const onClock = draftOrder.picks.find((p) => p.overall_pick === onClockOverall);
     if (!onClock?.team_abbreviation) {
       setLiveMlPlayers(null);
@@ -449,6 +477,10 @@ export default function DashboardPage() {
   const picksPerPage = 8;
   const overallPageCount = Math.max(1, Math.ceil(overallPredictions.length / picksPerPage));
   const currentOverallRows = overallPredictions.slice((overallPage - 1) * picksPerPage, overallPage * picksPerPage);
+  const maxCoverageSample = useMemo(
+    () => overallPredictions.reduce((mx, row) => Math.max(mx, row.sampleSize), 0),
+    [overallPredictions]
+  );
   const completedRows = liveBoard?.picks.filter((p) => Boolean(p.actual_player_name)) ?? [];
   const latestCompletedOverall = completedRows.length ? Math.max(...completedRows.map((p) => p.overall_pick)) : 0;
   const currentOverall = latestCompletedOverall + 1;
@@ -488,7 +520,8 @@ export default function DashboardPage() {
     const candidate = scenarioBasePlayers.find((p) => p.position === position) ?? scenarioBasePlayers[0];
     return { position, probability, candidate };
   });
-  const inferredPhase: DashboardPhase = latestCompletedOverall === 0 ? "pre" : latestCompletedOverall >= 32 ? "post" : "live";
+  const inferredPhase: DashboardPhase =
+    latestCompletedOverall === 0 ? "pre" : latestCompletedOverall >= FULL_DRAFT_PICKS ? "post" : "live";
   const dashboardPhase: DashboardPhase = phaseOverride === "auto" ? inferredPhase : phaseOverride;
   const showLiveCommandCenter = dashboardPhase === "live" && trackLiveDraft;
   const showOverallLadder = dashboardPhase !== "live";
@@ -500,27 +533,55 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      <section className="rounded-xl border border-cyan-800/40 bg-cyan-950/20 p-4 sm:p-5">
+        <h2 className="text-lg font-semibold text-cyan-100 sm:text-xl">New here? How to use DraftDay</h2>
+        <p className="mt-2 text-sm text-cyan-50/90">
+          This site helps you understand who might be drafted next and why. It combines crowd mock-draft consensus
+          with an internal model, then shows team context so you can compare ideas quickly.
+        </p>
+        <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-cyan-50/90">
+          <li>
+            Pick a <span className="font-semibold">Year</span>, <span className="font-semibold">Team</span>, and{" "}
+            <span className="font-semibold">Pick</span> in the controls below.
+          </li>
+          <li>
+            Read <span className="font-semibold">Top Players For Pick</span> to see the leading consensus options.
+          </li>
+          <li>
+            Check <span className="font-semibold">Likely landing spots</span> to see where a player is most often
+            projected to go.
+          </li>
+          <li>
+            Use <span className="font-semibold">Draft Intelligence</span> to compare team needs, model probabilities,
+            and consensus-vs-model disagreements.
+          </li>
+          <li>
+            If the draft is active, turn on <span className="font-semibold">Track NFL.com live draft</span> so already
+            drafted players are removed from recommendations.
+          </li>
+        </ol>
+      </section>
       <header>
-        <h1 className="text-3xl font-bold">DraftDay Dashboard</h1>
+        <h1 className="text-2xl font-bold sm:text-3xl">DraftDay Dashboard</h1>
         <p className="mt-2 text-slate-300">
           Use the controls to view consensus, ML, and organizational context for the current draft class.
         </p>
-        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-slate-800 bg-slate-900/70 p-3">
+        <div className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-slate-800 bg-slate-900/70 p-3">
           <label className="text-sm">
-            Year
+            <span className="block">Year</span>
             <input
               type="number"
               value={draftYear}
               onChange={(e) => setDraftYear(Number(e.target.value))}
-              className="ml-2 w-24 rounded border border-slate-700 bg-slate-950 px-2 py-1"
+              className="mt-1 w-24 rounded border border-slate-700 bg-slate-950 px-2 py-1"
             />
           </label>
           <label className="text-sm">
-            Team
+            <span className="block">Team</span>
             <select
               value={team}
               onChange={(e) => setTeam(e.target.value.toUpperCase())}
-              className="ml-2 w-24 rounded border border-slate-700 bg-slate-950 px-2 py-1"
+              className="mt-1 w-24 rounded border border-slate-700 bg-slate-950 px-2 py-1"
             >
               {NFL_TEAMS.map((abbr) => (
                 <option key={abbr} value={abbr}>
@@ -530,18 +591,18 @@ export default function DashboardPage() {
             </select>
           </label>
           <label className="text-sm">
-            Pick
+            <span className="block">Pick</span>
             <input
               type="number"
               value={pick}
               onChange={(e) => setPick(Number(e.target.value))}
-              className="ml-2 w-20 rounded border border-slate-700 bg-slate-950 px-2 py-1"
+              className="mt-1 w-20 rounded border border-slate-700 bg-slate-950 px-2 py-1"
             />
           </label>
           {loading ? <span className="text-sm text-slate-400">Refreshing...</span> : null}
           <Link
             href={`/teams/${team}/draft-view`}
-            className="rounded border border-slate-600 px-3 py-1 text-sm font-medium hover:bg-slate-800"
+            className="w-full rounded border border-slate-600 px-3 py-1 text-center text-sm font-medium hover:bg-slate-800 sm:w-auto"
           >
             Open Team/Coach View
           </Link>
@@ -555,11 +616,11 @@ export default function DashboardPage() {
             Track NFL.com live draft
           </label>
           <label className="text-sm">
-            Phase
+            <span className="block">Phase</span>
             <select
               value={phaseOverride}
               onChange={(e) => setPhaseOverride(e.target.value as DashboardPhase | "auto")}
-              className="ml-2 rounded border border-slate-700 bg-slate-950 px-2 py-1"
+              className="mt-1 rounded border border-slate-700 bg-slate-950 px-2 py-1"
             >
               <option value="auto">Auto ({inferredPhase})</option>
               <option value="pre">Pre-draft</option>
@@ -841,11 +902,33 @@ export default function DashboardPage() {
         <p className="mt-1 text-sm text-slate-300">
           {trackLiveDraft
             ? "Live mode emphasizes still-available players and near-term picks; this ladder remains useful for the upcoming block of selections."
-            : "Top consensus player by pick for the first 32 selections. Each row uses the best available pick at that slot that has not already appeared above, so the same player cannot be listed for two different picks."}
+            : "Top consensus player by pick through Day 2 (picks 1-102). Each row uses the best available pick at that slot that has not already appeared above, so the same player cannot be listed for two different picks."}
         </p>
         <p className="mt-1 text-xs text-slate-500">
           Click a row to load smoothed landing-spot odds for that player in the panel on the right.
         </p>
+        <div className="mt-3 rounded border border-slate-800 bg-slate-950/50 p-3">
+          <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <h3 className="text-sm font-semibold text-slate-100">Day 2 Consensus Coverage Heatmap</h3>
+            <span className="text-xs text-slate-400">darker/greener = more mock rows at that pick</span>
+          </div>
+          <div className="mt-2 grid grid-cols-12 gap-1 md:grid-cols-17">
+            {overallPredictions.map((row) => (
+              <button
+                key={`coverage-${row.pick}`}
+                type="button"
+                title={`Pick ${row.pick}: n=${row.sampleSize}, top ${row.player}`}
+                onClick={() => focusPickInDashboard(row.pick, row.player)}
+                className={`rounded px-1.5 py-1 text-[10px] font-semibold ${coverageCellTone(
+                  row.sampleSize,
+                  maxCoverageSample
+                )}`}
+              >
+                {row.pick}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="mt-3 flex items-center gap-2">
           <button
             type="button"
@@ -870,10 +953,7 @@ export default function DashboardPage() {
             <button
               key={row.pick}
               type="button"
-              onClick={() => {
-                setLandingFocusPlayer(row.player);
-                setLandingFocusPick(row.pick);
-              }}
+              onClick={() => focusPickInDashboard(row.pick, row.player)}
               className={`rounded border bg-slate-950/70 px-3 py-2 text-left text-sm transition hover:border-cyan-700/60 hover:bg-slate-900 ${
                 landingFocusPlayer === row.player
                   ? "border-cyan-600 ring-1 ring-cyan-600/40"

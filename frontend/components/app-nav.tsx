@@ -10,13 +10,13 @@ export function AppNav() {
 
   return (
     <header className="mb-6 rounded-xl border border-slate-800 bg-slate-900/70 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-slate-100">DraftDay</h1>
           <p className="text-sm text-slate-300">Consensus, intelligence, and team/coach context in one place.</p>
         </div>
-        <nav className="flex items-center gap-2">
-          <Link href="/" className="rounded bg-indigo-700 px-3 py-2 text-sm font-medium hover:bg-indigo-600">
+        <nav className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          <Link href="/" className="rounded bg-indigo-700 px-3 py-2 text-center text-sm font-medium hover:bg-indigo-600">
             Overall Draft Predictions
           </Link>
           <div className="flex items-center gap-2">

@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+import { getApiBaseUrl } from "./api-base";
 
 export type TeamNeedItem = {
   position: string;
@@ -83,6 +83,7 @@ export type IntelligenceModelMetadataResponse = {
 };
 
 export async function getTeamNeeds(team: string, year: number): Promise<TeamNeedsResponse> {
+  const API_BASE = getApiBaseUrl();
   const response = await fetch(
     `${API_BASE}/api/v1/intelligence/team-needs?team=${encodeURIComponent(team)}&year=${year}`,
     { cache: "no-store" }
@@ -98,6 +99,7 @@ export async function getPickPositionProbs(
   pick: number,
   year: number
 ): Promise<PositionProbabilityResponse> {
+  const API_BASE = getApiBaseUrl();
   const response = await fetch(
     `${API_BASE}/api/v1/intelligence/pick-position-probs?team=${encodeURIComponent(team)}&pick=${pick}&year=${year}`,
     { cache: "no-store" }
@@ -115,6 +117,7 @@ export async function getPickPlayerProbs(
   candidate_players: PickPlayerCandidateInput[] = [],
   options?: { boardAware?: boolean }
 ): Promise<PickPlayerProbsResponse> {
+  const API_BASE = getApiBaseUrl();
   const response = await fetch(`${API_BASE}/api/v1/intelligence/pick-player-probs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -139,6 +142,7 @@ export async function getCompareWithConsensus(
   year: number,
   options?: { boardAware?: boolean }
 ): Promise<ConsensusVsMlResponse> {
+  const API_BASE = getApiBaseUrl();
   const params = new URLSearchParams({
     team,
     pick: String(pick),
@@ -158,6 +162,7 @@ export async function getCompareWithConsensus(
 }
 
 export async function getModelMetadata(): Promise<IntelligenceModelMetadataResponse> {
+  const API_BASE = getApiBaseUrl();
   const response = await fetch(`${API_BASE}/api/v1/intelligence/model-metadata`, {
     cache: "no-store"
   });

@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from math import exp
 
 from sqlalchemy import Select, func, select
@@ -23,7 +23,10 @@ LOW_CONFIDENCE_MAX_SAMPLES = 4
 
 
 def _equivalent_candidate_pool_size(overall_pick: int) -> int:
-    """Larger implicit pools later in round-1 → less mass on the lone leader (avoids identical 0.75 rows)."""
+    """Larger implicit pools later in round-1.
+
+    This reduces mass on a lone leader and avoids repeated 0.75 rows.
+    """
     return min(28, max(6, 3 + overall_pick // 2))
 
 
@@ -34,7 +37,10 @@ def _landing_equivalent_pool_k(
     unique_articles: int,
     earliest_overall_pick: int,
 ) -> int:
-    """Dirichlet pool over listed teams + OTHER. Varies with evidence and slot — never one-size 81:19."""
+    """Dirichlet pool over listed teams + OTHER.
+
+    It varies with evidence and slot; never one-size 81:19.
+    """
     m = num_distinct_teams
     k_floor = m + 1
     n = total_mock_rows
@@ -51,15 +57,14 @@ def _landing_equivalent_pool_k(
     if 5 <= n <= 6:
         return max(k_floor, min(10, 3 + (20 // (n + 2))))
 
-    # Richer evidence → smaller implicit OTHER pool (even with one RSS/source if many snapshots exist).
+    # Richer evidence means a smaller implicit OTHER pool, even with one source
+    # when there are enough snapshots.
     k = 2 + max(0, min(6, 28 // (n + 2)))
     if src <= 1:
         k = max(k_floor, k - 1)
     if arts >= 8:
         k = max(k_floor, k - 1)
-    if ep <= 6 and n >= 6:
-        k = max(k_floor, k - 1)
-    elif ep <= 12 and n >= 10:
+    if (ep <= 6 and n >= 6) or (ep <= 12 and n >= 10):
         k = max(k_floor, k - 1)
     if src >= 3:
         k = k_floor
@@ -79,10 +84,7 @@ def _dirichlet_smoothed(
         return {}, 0.0, 0
     m = len(category_values)
     k_floor = m + 1
-    if equivalent_pool_k is not None:
-        k = max(k_floor, int(equivalent_pool_k))
-    else:
-        k = k_floor
+    k = max(k_floor, int(equivalent_pool_k)) if equivalent_pool_k is not None else k_floor
     total = sum(float(v) for v in category_values.values())
     denom = total + alpha * k
     smoothed = {key: (float(val) + alpha) / denom for key, val in category_values.items()}
@@ -108,8 +110,10 @@ def pick_consensus(
     *,
     exclude_taken_normalized: frozenset[str] | None = None,
 ) -> PickConsensusResponse:
-    rows = db.execute(_base_pick_query(draft_year).where(MockPick.overall_pick == overall_pick)).all()
-    now = datetime.now(timezone.utc)
+    rows = db.execute(
+        _base_pick_query(draft_year).where(MockPick.overall_pick == overall_pick)
+    ).all()
+    now = datetime.now(UTC)
     if not rows:
         return PickConsensusResponse(
             draft_year=draft_year,
@@ -140,7 +144,7 @@ def pick_consensus(
         article_ids.add(article.id)
 
         published = article.published_at or article.fetched_at
-        published_utc = published if published.tzinfo else published.replace(tzinfo=timezone.utc)
+        published_utc = published if published.tzinfo else published.replace(tzinfo=UTC)
         age_days = max(0, (now - published_utc).days)
         recency_weight = exp(-age_days / max(1, source.recency_half_life_days))
         weighted[key] += float(source.default_weight) * recency_weight
@@ -159,7 +163,9 @@ def pick_consensus(
 
     pool_k = _equivalent_candidate_pool_size(overall_pick)
     count_floats = {k: float(v) for k, v in counts.items()}
-    smooth_counts, p_other_count, k_count = _dirichlet_smoothed(count_floats, equivalent_pool_k=pool_k)
+    smooth_counts, p_other_count, k_count = _dirichlet_smoothed(
+        count_floats, equivalent_pool_k=pool_k
+    )
     smooth_weighted, _, _ = _dirichlet_smoothed(weighted, equivalent_pool_k=pool_k)
 
     top = sorted(
@@ -169,7 +175,9 @@ def pick_consensus(
     )[:top_n]
     total_weighted = sum(weighted.values()) or 1.0
 
-    low_confidence = len(source_ids) <= LOW_CONFIDENCE_MAX_SOURCES or total <= LOW_CONFIDENCE_MAX_SAMPLES
+    low_confidence = (
+        len(source_ids) <= LOW_CONFIDENCE_MAX_SOURCES or total <= LOW_CONFIDENCE_MAX_SAMPLES
+    )
     confidence = ConsensusConfidence(
         sample_size=total,
         unique_sources=len(source_ids),
@@ -208,9 +216,10 @@ def player_landing_spots(
     *,
     context_overall_pick: int | None = None,
 ) -> PlayerLandingSpotsResponse:
-    # Must match ingestion (`normalize_player_name`); `.lower().strip()` alone misses punctuation / suffix rules.
+    # Must match ingestion (`normalize_player_name`); `.lower().strip()` alone
+    # misses punctuation and suffix rules.
     normalized = normalize_player_name(player_name) or player_name.lower().strip()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     cycle = db.scalar(select(DraftCycle).where(DraftCycle.year == draft_year))
     cycle_total_rows: int | None = None
@@ -218,13 +227,17 @@ def player_landing_spots(
     if cycle is not None:
         cycle_total_rows = int(
             db.scalar(
-                select(func.count()).select_from(MockPick).where(MockPick.draft_cycle_id == cycle.id)
+                select(func.count())
+                .select_from(MockPick)
+                .where(MockPick.draft_cycle_id == cycle.id)
             )
             or 0
         )
         cycle_article_count = int(
             db.scalar(
-                select(func.count()).select_from(MockArticle).where(MockArticle.draft_cycle_id == cycle.id)
+                select(func.count())
+                .select_from(MockArticle)
+                .where(MockArticle.draft_cycle_id == cycle.id)
             )
             or 0
         )
@@ -244,9 +257,14 @@ def player_landing_spots(
             or 0
         )
 
-    rows = db.execute(
-        _base_pick_query(draft_year).where(MockPick.normalized_player_name == normalized)
-    ).all()
+    base_query = _base_pick_query(draft_year).where(MockPick.normalized_player_name == normalized)
+    if context_overall_pick is not None:
+        context_rows = db.execute(
+            base_query.where(MockPick.overall_pick == context_overall_pick)
+        ).all()
+        rows = context_rows if context_rows else db.execute(base_query).all()
+    else:
+        rows = db.execute(base_query).all()
     if not rows:
         return PlayerLandingSpotsResponse(
             draft_year=draft_year,
@@ -268,13 +286,42 @@ def player_landing_spots(
     earliest_pick = 256
     for pick, article, source in rows:
         team_id = pick.current_team_id or pick.original_team_id
-        team = team_map.get(team_id, "UNK") if team_id is not None else "UNK"
+        if team_id is None:
+            # Preserve unknown team rows as unknown; do not force a draft-order team.
+            # For sparse day-2 data this can create misleading "100% <team>" outputs.
+            continue
+        team = team_map.get(team_id, "UNK")
+        if team == "UNK":
+            continue
         counts[team] += 1
         source_ids.add(source.id)
         article_ids.add(article.id)
         earliest_pick = min(earliest_pick, int(pick.overall_pick))
 
     total = len(rows)
+    known_total = sum(counts.values())
+    if known_total == 0:
+        return PlayerLandingSpotsResponse(
+            draft_year=draft_year,
+            player_name=player_name,
+            top_landing_spots=[],
+            updated_at=now,
+            landing_confidence=LandingConfidence(
+                sample_size=total,
+                unique_teams=0,
+                unique_sources=len(source_ids),
+                unique_articles=len(article_ids),
+                smoothing_alpha=DEFAULT_SMOOTHING_ALPHA,
+                category_count=0,
+                other_bucket_probability=1.0,
+                low_confidence=True,
+            ),
+            resolved_lookup_name=normalized,
+            context_overall_pick=context_overall_pick,
+            mock_rows_at_context_pick=slot_rows_at_ctx,
+            draft_cycle_total_pick_rows=cycle_total_rows,
+            draft_cycle_mock_articles=cycle_article_count,
+        )
     unique_sources = len(source_ids)
     unique_articles = len(article_ids)
     count_floats = {k: float(v) for k, v in counts.items()}
@@ -283,7 +330,11 @@ def player_landing_spots(
     )
     smooth_teams, p_other, k_teams = _dirichlet_smoothed(count_floats, equivalent_pool_k=pool_k)
     # Order teams by observed counts so the API list matches what users see in raw mock rows.
-    ranked = sorted(count_floats.items(), key=lambda item: item[1], reverse=True)[:top_n]
+    ranked = sorted(
+        smooth_teams.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    )[:top_n]
     low_confidence = (
         len(counts) <= 1
         or total <= LOW_CONFIDENCE_MAX_SAMPLES
@@ -313,7 +364,7 @@ def player_landing_spots(
             PlayerLandingSpot(
                 team=team,
                 probability=float(prob),
-                raw_probability=float(counts[team] / total),
+                raw_probability=float(counts[team] / known_total),
             )
             for team, prob in ranked
         ],

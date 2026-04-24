@@ -14,6 +14,7 @@ from app.models.entities import (
     Team,
 )
 from app.normalization.normalizers import (
+    TEAM_ALIASES,
     normalize_player_name,
     normalize_position,
     normalize_school,
@@ -47,7 +48,7 @@ def upsert_mock_draft(db: Session, parsed: ParsedMockDraft) -> MockArticle:
         raise ValueError(f"Unknown draft cycle year: {parsed.draft_year}")
 
     content_hash = sha256(
-        f"{parsed.article_url}|{parsed.title}|{len(parsed.picks)}".encode("utf-8")
+        f"{parsed.article_url}|{parsed.title}|{len(parsed.picks)}".encode()
     ).hexdigest()
     existing = db.scalar(
         select(MockArticle).where(
@@ -126,6 +127,16 @@ def resolve_team_id(db: Session, raw_team: str | None) -> int | None:
             if team is not None:
                 return team.id
     key = normalize_text(s)
+    # Fallback for verbose labels like "from the Tennessee Titans (via ...)".
+    # Prefer longest alias hit to avoid partial collisions.
+    alias_hits = [alias for alias in TEAM_ALIASES if f" {alias} " in f" {key} "]
+    if alias_hits:
+        best_alias = max(alias_hits, key=len)
+        abbr = TEAM_ALIASES.get(best_alias)
+        if abbr:
+            team = db.scalar(select(Team).where(Team.abbreviation == abbr))
+            if team is not None:
+                return team.id
     team = db.scalar(select(Team).where(func.lower(Team.full_name) == key))
     if team is not None:
         return team.id

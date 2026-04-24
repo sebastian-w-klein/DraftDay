@@ -57,10 +57,7 @@ def _parse_tracker_picks(html: str) -> list[NflTrackerPick]:
             obj_start = pre_start + yi
         else:
             yi2 = pre.rfind('[{\\"year\\"')
-            if yi2 >= 0:
-                obj_start = pre_start + yi2 + 1
-            else:
-                obj_start = m.start()
+            obj_start = pre_start + yi2 + 1 if yi2 >= 0 else m.start()
         b = html[obj_start:next_start]
 
         m_round = re.search(r'\\"round\\":(\d+)', b)
@@ -133,8 +130,8 @@ def ingest_nfl_com_tracker_picks(db: Session, draft_year: int) -> int:
     Pull live / current tracker state from nfl.com and upsert ``actual_draft_picks``
     for the given draft year (must match embedded ``year`` on pick rows).
 
-    Also upserts round-1 ``draft_order_picks`` (overall 1–32) from the same payload so
-    upcoming slots reflect trades before a prospect is assigned.
+    Also upserts ``draft_order_picks`` from the same payload so upcoming slots
+    reflect trades across all rounds before a prospect is assigned.
     """
     cycle = db.scalar(select(DraftCycle).where(DraftCycle.year == draft_year))
     if cycle is None:
@@ -179,8 +176,6 @@ def ingest_nfl_com_tracker_picks(db: Session, draft_year: int) -> int:
 
     order_source = "nfl.com-draft-tracker"
     for p in remote:
-        if p.overall_pick > 32:
-            continue
         team_id = resolve_team_id(db, p.team_abbreviation)
         order_row = db.scalar(
             select(DraftOrderPick).where(

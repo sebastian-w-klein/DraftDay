@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+# ruff: noqa: I001
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,16 +11,24 @@ from app.analytics.consensus import pick_consensus, player_landing_spots
 from app.board_state import taken_normalized_names
 from app.draft_order_context import compute_next_round1_overall_for_team
 from app.db.session import get_db
-from app.ingestion.service import upsert_mock_draft
 from app.ingestion.draft_order_live import ingest_live_tankathon_draft_order
 from app.ingestion.nfl_com_tracker_live import ingest_nfl_com_tracker_picks
 from app.ingestion.prospects_live import ingest_live_tankathon_prospects
+from app.ingestion.runner import (
+    run_all_active_ingestion_sync,
+    run_ingestion_for_source_sync,
+)
+from app.ingestion.service import upsert_mock_draft
 from app.ingestion.team_staff_live import ingest_live_team_staff
-from app.ingestion.runner import run_all_active_ingestion_sync, run_ingestion_for_source_sync
 from app.models.entities import ActualDraftPick, DraftCycle, DraftOrderPick, Source, Team
 from app.normalization.normalizers import normalize_player_name
 from app.parsers.factory import build_parser
-from app.schemas.api import LiveDraftBoardResponse, LiveDraftPickRow, PickConsensusResponse, PlayerLandingSpotsResponse
+from app.schemas.api import (
+    LiveDraftBoardResponse,
+    LiveDraftPickRow,
+    PickConsensusResponse,
+    PlayerLandingSpotsResponse,
+)
 from app.schemas.ingestion import (
     ActualPickInput,
     BacktestResult,
@@ -31,6 +40,7 @@ from app.schemas.ingestion import (
 from app.schemas.parsed import ParsedMockDraft
 
 router = APIRouter(prefix="/v1", tags=["draft"])
+DB_SESSION = Depends(get_db)
 
 
 def _consensus_rank_for_actual(
@@ -56,7 +66,7 @@ def get_pick_consensus(
         default=False,
         description="Exclude mock predictions for players already taken (actual_draft_picks).",
     ),
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
 ) -> PickConsensusResponse:
     if overall_pick <= 0:
         raise HTTPException(status_code=400, detail="overall_pick must be > 0")
@@ -72,7 +82,9 @@ def get_pick_consensus(
     )
 
 
-@router.get("/consensus/players/{draft_year}/{player_name}", response_model=PlayerLandingSpotsResponse)
+@router.get(
+    "/consensus/players/{draft_year}/{player_name}", response_model=PlayerLandingSpotsResponse
+)
 def get_player_landing_spots(
     draft_year: int,
     player_name: str,
@@ -81,9 +93,11 @@ def get_player_landing_spots(
         default=None,
         ge=1,
         le=400,
-        description="Overall pick number for slot-level mock depth (see mock_rows_at_context_pick).",
+        description=(
+            "Overall pick number for slot-level mock depth (see mock_rows_at_context_pick)."
+        ),
     ),
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
 ) -> PlayerLandingSpotsResponse:
     return player_landing_spots(
         db,
@@ -95,10 +109,14 @@ def get_player_landing_spots(
 
 
 @router.post("/ingestion/manual", response_model=IngestionResponse)
-def ingest_manual_mock(payload: ManualMockDraftRequest, db: Session = Depends(get_db)) -> IngestionResponse:
+def ingest_manual_mock(
+    payload: ManualMockDraftRequest, db: Session = DB_SESSION
+) -> IngestionResponse:
     parsed = ParsedMockDraft(
         source_slug=payload.source_slug,
-        article_url=str(payload.article_url) if payload.article_url is not None else "manual://entry",
+        article_url=(
+            str(payload.article_url) if payload.article_url is not None else "manual://entry"
+        ),
         title=payload.title,
         author_name=payload.author_name,
         published_at=payload.published_at,
@@ -107,22 +125,30 @@ def ingest_manual_mock(payload: ManualMockDraftRequest, db: Session = Depends(ge
         picks=payload.picks,
     )
     article = upsert_mock_draft(db, parsed)
-    return IngestionResponse(article_id=article.id, status="success", picks_inserted=len(parsed.picks))
+    return IngestionResponse(
+        article_id=article.id, status="success", picks_inserted=len(parsed.picks)
+    )
 
 
 @router.post("/ingestion/parse-url", response_model=IngestionResponse)
-async def ingest_from_url(payload: ParseFromUrlRequest, db: Session = Depends(get_db)) -> IngestionResponse:
+async def ingest_from_url(
+    payload: ParseFromUrlRequest, db: Session = DB_SESSION
+) -> IngestionResponse:
     source = db.scalar(select(Source).where(Source.slug == payload.source_slug))
     if source is None:
         raise HTTPException(status_code=404, detail=f"Unknown source slug: {payload.source_slug}")
-    parser = build_parser(source_slug=source.slug, parser_type=source.parser_type, base_url=source.base_url)
+    parser = build_parser(
+        source_slug=source.slug, parser_type=source.parser_type, base_url=source.base_url
+    )
     parsed = await parser.parse_article(str(payload.url))
     article = upsert_mock_draft(db, parsed)
-    return IngestionResponse(article_id=article.id, status="success", picks_inserted=len(parsed.picks))
+    return IngestionResponse(
+        article_id=article.id, status="success", picks_inserted=len(parsed.picks)
+    )
 
 
 @router.post("/actual-picks")
-def ingest_actual_pick(payload: ActualPickInput, db: Session = Depends(get_db)) -> dict[str, int]:
+def ingest_actual_pick(payload: ActualPickInput, db: Session = DB_SESSION) -> dict[str, int]:
     cycle = db.scalar(select(DraftCycle).where(DraftCycle.year == payload.draft_year))
     if cycle is None:
         raise HTTPException(status_code=404, detail=f"Unknown draft year: {payload.draft_year}")
@@ -141,7 +167,7 @@ def ingest_actual_pick(payload: ActualPickInput, db: Session = Depends(get_db)) 
 
 
 @router.post("/analytics/backtest/{draft_year}", response_model=list[BacktestResult])
-def backtest_sources(draft_year: int, db: Session = Depends(get_db)) -> list[BacktestResult]:
+def backtest_sources(draft_year: int, db: Session = DB_SESSION) -> list[BacktestResult]:
     rows = run_source_backtest(db, draft_year)
     source_by_id = {source.id: source.slug for source in db.scalars(select(Source)).all()}
     return [
@@ -164,7 +190,7 @@ def run_all_ingestion() -> dict[str, str]:
 
 
 @router.post("/ingestion/run/{source_slug}")
-def run_source_ingestion(source_slug: str, db: Session = Depends(get_db)) -> dict[str, str]:
+def run_source_ingestion(source_slug: str, db: Session = DB_SESSION) -> dict[str, str]:
     source = db.scalar(select(Source).where(Source.slug == source_slug))
     if source is None:
         raise HTTPException(status_code=404, detail=f"Unknown source slug: {source_slug}")
@@ -173,7 +199,9 @@ def run_source_ingestion(source_slug: str, db: Session = Depends(get_db)) -> dic
 
 
 @router.post("/ingestion/draft-order")
-def ingest_draft_order(payload: DraftOrderIngestionRequest, db: Session = Depends(get_db)) -> dict[str, int | str]:
+def ingest_draft_order(
+    payload: DraftOrderIngestionRequest, db: Session = DB_SESSION
+) -> dict[str, int | str]:
     cycle = db.scalar(select(DraftCycle).where(DraftCycle.year == payload.draft_year))
     if cycle is None:
         raise HTTPException(status_code=404, detail=f"Unknown draft year: {payload.draft_year}")
@@ -209,12 +237,18 @@ def ingest_draft_order(payload: DraftOrderIngestionRequest, db: Session = Depend
 @router.get("/draft-order/{draft_year}")
 def get_draft_order(
     draft_year: int,
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
     team: str | None = Query(
         default=None,
         min_length=2,
         max_length=4,
-        description="When set (e.g. TEN), response includes next unfilled round-1 overall for that team.",
+        description="When set (e.g. TEN), response includes next unfilled overall for that team.",
+    ),
+    max_overall: int = Query(
+        default=400,
+        ge=1,
+        le=400,
+        description="Upper bound used when resolving next_overall_pick for team context.",
     ),
 ) -> dict[str, object]:
     cycle = db.scalar(select(DraftCycle).where(DraftCycle.year == draft_year))
@@ -242,7 +276,7 @@ def get_draft_order(
         abbr = team.strip().upper()
         out["resolved_team"] = abbr
         out["next_overall_pick"] = compute_next_round1_overall_for_team(
-            db, draft_cycle_id=cycle.id, team_abbr=abbr, max_overall=32
+            db, draft_cycle_id=cycle.id, team_abbr=abbr, max_overall=max_overall
         )
     return out
 
@@ -250,7 +284,7 @@ def get_draft_order(
 @router.post("/ingestion/draft-order/live")
 def ingest_live_draft_order(
     draft_year: int = Query(..., ge=2010, le=2100),
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
 ) -> dict[str, int | str]:
     try:
         count = ingest_live_tankathon_draft_order(db, draft_year=draft_year)
@@ -264,7 +298,7 @@ def ingest_live_draft_order(
 @router.post("/ingestion/team-staff/live")
 def ingest_live_staff(
     draft_year: int = Query(..., ge=2010, le=2100),
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
 ) -> dict[str, int | str]:
     try:
         count = ingest_live_team_staff(db, draft_year=draft_year)
@@ -279,7 +313,7 @@ def ingest_live_staff(
 def ingest_live_prospects(
     draft_year: int = Query(..., ge=2010, le=2100),
     limit: int = Query(default=128, ge=16, le=512),
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
 ) -> dict[str, int | str]:
     try:
         count = ingest_live_tankathon_prospects(db, draft_year=draft_year, limit=limit)
@@ -293,15 +327,20 @@ def ingest_live_prospects(
 @router.post("/ingestion/nfl-draft-tracker/live")
 def ingest_nfl_draft_tracker_live(
     draft_year: int = Query(..., ge=2010, le=2100),
-    db: Session = Depends(get_db),
+    db: Session = DB_SESSION,
 ) -> dict[str, int | str]:
-    """Fetch https://www.nfl.com/draft/tracker and upsert announced picks into ``actual_draft_picks``."""
+    """Fetch nfl.com draft tracker and upsert announced picks."""
     try:
         count = ingest_nfl_com_tracker_picks(db, draft_year=draft_year)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"NFL.com tracker fetch failed: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"NFL.com tracker parse failed: {type(exc).__name__}",
+        ) from exc
     return {"status": "ok", "picks_upserted": count}
 
 
@@ -312,9 +351,15 @@ def get_live_draft_board(
         default=False,
         description="When true, fetches nfl.com draft tracker before reading the database.",
     ),
-    db: Session = Depends(get_db),
+    max_overall: int = Query(
+        default=257,
+        ge=1,
+        le=400,
+        description="Maximum overall pick to return in the live board payload.",
+    ),
+    db: Session = DB_SESSION,
 ) -> LiveDraftBoardResponse:
-    """Round 1 board: official picks (when announced) vs mock consensus from this app."""
+    """Live draft board: official picks (when announced) vs mock consensus."""
     cycle = db.scalar(select(DraftCycle).where(DraftCycle.year == draft_year))
     if cycle is None:
         raise HTTPException(status_code=404, detail=f"Unknown draft year: {draft_year}")
@@ -327,12 +372,21 @@ def get_live_draft_board(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=f"NFL.com tracker fetch failed: {exc}") from exc
+            raise HTTPException(
+                status_code=502, detail=f"NFL.com tracker fetch failed: {exc}"
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=502,
+                detail=f"NFL.com tracker parse failed: {type(exc).__name__}",
+            ) from exc
 
     actual_rows = db.execute(
         select(ActualDraftPick, Team.abbreviation)
         .outerjoin(Team, Team.id == ActualDraftPick.team_id)
-        .where(ActualDraftPick.draft_cycle_id == cycle.id, ActualDraftPick.overall_pick <= 32)
+        .where(
+            ActualDraftPick.draft_cycle_id == cycle.id, ActualDraftPick.overall_pick <= max_overall
+        )
     ).all()
     actual_by_overall: dict[int, tuple[ActualDraftPick, str | None]] = {
         int(row[0].overall_pick): (row[0], row[1]) for row in actual_rows
@@ -341,15 +395,21 @@ def get_live_draft_board(
     order_rows = db.execute(
         select(DraftOrderPick, Team.abbreviation)
         .join(Team, Team.id == DraftOrderPick.team_id)
-        .where(DraftOrderPick.draft_cycle_id == cycle.id, DraftOrderPick.overall_pick <= 32)
+        .where(
+            DraftOrderPick.draft_cycle_id == cycle.id, DraftOrderPick.overall_pick <= max_overall
+        )
     ).all()
     order_by_overall: dict[int, tuple[DraftOrderPick, str]] = {
         int(row[0].overall_pick): (row[0], row[1]) for row in order_rows
     }
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     picks_out: list[LiveDraftPickRow] = []
-    for overall in range(1, 33):
+    highest_seen_overall = max(
+        [0, *actual_by_overall.keys(), *order_by_overall.keys()],
+    )
+    board_max = min(max_overall, max(32, highest_seen_overall))
+    for overall in range(1, board_max + 1):
         taken_before = taken_normalized_names(db, draft_year, before_overall=overall)
         consensus = pick_consensus(
             db,

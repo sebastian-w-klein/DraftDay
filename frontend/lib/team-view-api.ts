@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+import { getApiBaseUrl } from "./api-base";
 
 export type TeamViewOrgProfileResponse = {
   team: string;
@@ -86,6 +86,7 @@ export type TeamViewDraftContextResponse = {
 };
 
 export async function getTeamViewOrgProfile(team: string, year: number): Promise<TeamViewOrgProfileResponse> {
+  const API_BASE = getApiBaseUrl();
   const response = await fetch(
     `${API_BASE}/api/v1/team-view/org-profile?team=${encodeURIComponent(team)}&year=${year}`,
     { cache: "no-store" }
@@ -99,6 +100,7 @@ export async function getTeamViewHistory(
   year: number,
   lookbackYears = 5
 ): Promise<TeamViewHistoryResponse> {
+  const API_BASE = getApiBaseUrl();
   const response = await fetch(
     `${API_BASE}/api/v1/team-view/history?team=${encodeURIComponent(team)}&year=${year}&lookback_years=${lookbackYears}`,
     { cache: "no-store" }
@@ -112,6 +114,7 @@ export async function getTeamViewPositionProbs(
   year: number,
   pick: number
 ): Promise<TeamViewPositionProbsResponse> {
+  const API_BASE = getApiBaseUrl();
   const response = await fetch(
     `${API_BASE}/api/v1/team-view/position-probs?team=${encodeURIComponent(team)}&year=${year}&pick=${pick}`,
     { cache: "no-store" }
@@ -127,6 +130,7 @@ export async function getTeamViewPlayerProbs(
   candidate_players: TeamViewPlayerCandidateInput[] = [],
   options?: { boardAware?: boolean }
 ): Promise<TeamViewPlayerProbsResponse> {
+  const API_BASE = getApiBaseUrl();
   const response = await fetch(`${API_BASE}/api/v1/team-view/player-probs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -149,6 +153,7 @@ export async function getTeamViewSummary(
   pick: number,
   options?: { boardAware?: boolean }
 ): Promise<TeamViewSummaryResponse> {
+  const API_BASE = getApiBaseUrl();
   const params = new URLSearchParams({
     team,
     year: String(year),
@@ -165,12 +170,14 @@ export async function getTeamViewSummary(
 }
 
 export async function getTeamViewBacktest(): Promise<TeamViewBacktestResponse> {
+  const API_BASE = getApiBaseUrl();
   const response = await fetch(`${API_BASE}/api/v1/team-view/backtest`, { cache: "no-store" });
   if (!response.ok) throw new Error(`Team view backtest request failed: ${response.status}`);
   return response.json();
 }
 
 export async function getTeamViewDraftContext(team: string, year: number): Promise<TeamViewDraftContextResponse> {
+  const API_BASE = getApiBaseUrl();
   const response = await fetch(
     `${API_BASE}/api/v1/team-view/draft-context?team=${encodeURIComponent(team)}&year=${year}`,
     { cache: "no-store" }

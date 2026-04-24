@@ -9,7 +9,7 @@ export function SourceAccuracyTable({ rows }: Props) {
     <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
       <h2 className="mb-4 text-lg font-semibold">Source Reliability Rankings</h2>
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
+        <table className="min-w-[40rem] w-full text-left text-sm">
           <thead className="text-slate-300">
             <tr>
               <th className="pb-2">Source</th>

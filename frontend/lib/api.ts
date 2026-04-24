@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+import { getApiBaseUrl } from "./api-base";
 
 export type PickProbability = {
   player_name: string;
@@ -88,6 +88,7 @@ export async function getPickConsensus(
   overallPick: number,
   options?: { topN?: number; boardAware?: boolean }
 ): Promise<PickConsensusResponse> {
+  const API_BASE = getApiBaseUrl();
   const params = new URLSearchParams();
   if (options?.topN != null) {
     params.set("top_n", String(options.topN));
@@ -111,6 +112,7 @@ export async function getPlayerLandingSpots(
   playerName: string,
   options?: { contextOverallPick?: number }
 ): Promise<PlayerLandingSpotsResponse> {
+  const API_BASE = getApiBaseUrl();
   const params = new URLSearchParams();
   if (options?.contextOverallPick != null) {
     params.set("context_overall_pick", String(options.contextOverallPick));
@@ -128,11 +130,15 @@ export async function getPlayerLandingSpots(
 
 export async function getDraftOrder(
   draftYear: number,
-  options?: { team?: string }
+  options?: { team?: string; maxOverall?: number }
 ): Promise<DraftOrderResponse> {
+  const API_BASE = getApiBaseUrl();
   const params = new URLSearchParams();
   if (options?.team) {
     params.set("team", options.team);
+  }
+  if (options?.maxOverall != null) {
+    params.set("max_overall", String(options.maxOverall));
   }
   const q = params.toString();
   const response = await fetch(`${API_BASE}/v1/draft-order/${draftYear}${q ? `?${q}` : ""}`, {
@@ -164,11 +170,15 @@ export type LiveDraftBoardResponse = {
 
 export async function getLiveDraftBoard(
   draftYear: number,
-  options?: { sync?: boolean }
+  options?: { sync?: boolean; maxOverall?: number }
 ): Promise<LiveDraftBoardResponse> {
+  const API_BASE = getApiBaseUrl();
   const params = new URLSearchParams();
   if (options?.sync) {
     params.set("sync", "true");
+  }
+  if (options?.maxOverall != null) {
+    params.set("max_overall", String(options.maxOverall));
   }
   const q = params.toString();
   const url = `${API_BASE}/v1/live-draft/${draftYear}${q ? `?${q}` : ""}`;
@@ -180,6 +190,7 @@ export async function getLiveDraftBoard(
 }
 
 export async function runBacktest(draftYear: number): Promise<BacktestResult[]> {
+  const API_BASE = getApiBaseUrl();
   const response = await fetch(`${API_BASE}/v1/analytics/backtest/${draftYear}`, {
     method: "POST",
     cache: "no-store"

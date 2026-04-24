@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { getLiveDraftBoard, type LiveDraftBoardResponse } from "@/lib/api";
 
+const FULL_DRAFT_PICKS = 257;
+
 function rankLabel(rank: number | null): string {
   if (rank === null) return "—";
   if (rank === 0) return "Not in top 8";
@@ -32,7 +34,7 @@ export function LiveDraftBoard({
       setLoading(true);
       setErr(null);
       try {
-        const res = await getLiveDraftBoard(draftYear, { sync: true });
+        const res = await getLiveDraftBoard(draftYear, { sync: true, maxOverall: FULL_DRAFT_PICKS });
         if (!cancelled) {
           setData(res);
         }

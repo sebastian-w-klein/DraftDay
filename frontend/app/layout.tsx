@@ -6,7 +6,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <main className="mx-auto max-w-6xl p-6">
+        <main className="mx-auto max-w-6xl p-4 sm:p-6">
           <AppNav />
           {children}
         </main>

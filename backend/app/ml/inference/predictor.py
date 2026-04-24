@@ -20,6 +20,7 @@ from app.models.entities import (
     Team,
     TeamPositionNeedFeature,
 )
+from app.normalization.normalizers import normalize_player_name
 from backend.app.ml.data.roster_loader import load_roster_rows
 from backend.app.ml.explainability.grouped_explanations import grouped_feature_explanations
 from backend.app.ml.features.candidate_features import CandidateInput, build_candidate_features
@@ -27,7 +28,6 @@ from backend.app.ml.features.roster_strength import (
     adjusted_need_map_for_team,
     roster_strength_proxy,
 )
-from app.normalization.normalizers import normalize_player_name
 from backend.app.ml.models.player_model import PlayerModel, PlayerModelBundle
 from backend.app.ml.models.position_model import PositionModelBundle
 
@@ -100,7 +100,9 @@ def get_team_need_profile(db: Session, team_abbr: str, year: int) -> dict[str, o
             "position": row.position,
             "short_term_need_score": float(row.short_term_need_score or 0),
             "long_term_need_score": float(row.long_term_need_score or 0),
-            "overall_need_score": float(adjusted.get(row.position, float(row.overall_need_score or 0))),
+            "overall_need_score": float(
+                adjusted.get(row.position, float(row.overall_need_score or 0))
+            ),
             "feature_summary": {
                 "returning_snaps": float(row.returning_snaps or 0),
                 "returning_starts": float(row.returning_starts or 0),
@@ -123,7 +125,9 @@ def get_team_need_profile(db: Session, team_abbr: str, year: int) -> dict[str, o
     }
 
 
-def predict_pick_position(db: Session, team_abbr: str, pick: int, year: int) -> PositionPredictionResult:
+def predict_pick_position(
+    db: Session, team_abbr: str, pick: int, year: int
+) -> PositionPredictionResult:
     team = db.scalar(select(Team).where(Team.abbreviation == team_abbr.upper()))
     cycle = db.scalar(select(DraftCycle).where(DraftCycle.year == year))
     if team is None or cycle is None:
@@ -166,9 +170,11 @@ def predict_pick_position(db: Session, team_abbr: str, pick: int, year: int) -> 
     else:
         top_pos_pick = top_need.position if top_need else "UNK"
     row = {
-        "need_score": float(need_adjusted.get(top_need.position, top_need.overall_need_score))
-        if top_need is not None
-        else 0.5,
+        "need_score": (
+            float(need_adjusted.get(top_need.position, top_need.overall_need_score))
+            if top_need is not None
+            else 0.5
+        ),
         "board_scarcity_score": float(ctx.board_scarcity_score or 0) if ctx else 0.0,
         "best_available_player_score": float(ctx.best_available_player_score or 0) if ctx else 0.0,
         "overall_pick": pick,
@@ -189,7 +195,9 @@ def predict_pick_position(db: Session, team_abbr: str, pick: int, year: int) -> 
     else:
         if bundle is not None:
             probs = bundle.pipeline.predict_proba([row])[0]
-            prob_map = {label: float(prob) for label, prob in zip(bundle.class_labels, probs)}
+            prob_map = {
+                label: float(prob) for label, prob in zip(bundle.class_labels, probs, strict=False)
+            }
             sorted_probs = dict(sorted(prob_map.items(), key=lambda item: item[1], reverse=True))
         else:
             # Heuristic fallback keeps API usable on fresh databases.
@@ -203,7 +211,10 @@ def predict_pick_position(db: Session, team_abbr: str, pick: int, year: int) -> 
             }
             total = sum(sorted_probs.values()) or 1.0
             sorted_probs = {
-                k: v / total for k, v in dict(sorted(sorted_probs.items(), key=lambda item: item[1], reverse=True)).items()
+                k: v / total
+                for k, v in dict(
+                    sorted(sorted_probs.items(), key=lambda item: item[1], reverse=True)
+                ).items()
             }
         top_need_position = str(row["top_need_position"] or "UNK")
         top_need_score = float(row["need_score"] or 0.0)
@@ -234,7 +245,9 @@ def predict_pick_position(db: Session, team_abbr: str, pick: int, year: int) -> 
     need_profile = [
         {
             "position": n.position,
-            "overall_need_score": float(need_adjusted.get(n.position, float(n.overall_need_score or 0))),
+            "overall_need_score": float(
+                need_adjusted.get(n.position, float(n.overall_need_score or 0))
+            ),
         }
         for n in sorted(
             needs,
@@ -331,13 +344,18 @@ def predict_pick_players(
     taken = exclude_taken_normalized or frozenset()
     pred_type = _ml_cache_prediction_type("player_probs", exclude_taken_normalized)
 
-    raw_payload = list(candidate_payload) if candidate_payload else _default_candidate_payload(
-        db, cycle.id, pick, limit=24, exclude_normalized=taken
+    default_limit = 48 if pick >= 33 else 24
+    raw_payload = (
+        list(candidate_payload)
+        if candidate_payload
+        else _default_candidate_payload(
+            db, cycle.id, pick, limit=default_limit, exclude_normalized=taken
+        )
     )
     resolved_payload = _filter_candidates_by_board(raw_payload, taken)
     if not resolved_payload:
         resolved_payload = _default_candidate_payload(
-            db, cycle.id, pick, limit=24, exclude_normalized=frozenset()
+            db, cycle.id, pick, limit=default_limit, exclude_normalized=frozenset()
         )
     _assign_best_available_ranks(resolved_payload)
     candidates = [
@@ -347,12 +365,16 @@ def predict_pick_players(
             position=str(c["position"]),
             prospect_score=float(c["prospect_score"]),
             superstar_potential_score=float(c["superstar_potential_score"]),
-            consensus_rank=(int(c["consensus_rank"]) if c.get("consensus_rank") is not None else None),
+            consensus_rank=(
+                int(c["consensus_rank"]) if c.get("consensus_rank") is not None else None
+            ),
             best_available_rank=(
                 int(c["best_available_rank"]) if c.get("best_available_rank") is not None else None
             ),
             best_rank_in_position=(
-                int(c["best_rank_in_position"]) if c.get("best_rank_in_position") is not None else None
+                int(c["best_rank_in_position"])
+                if c.get("best_rank_in_position") is not None
+                else None
             ),
             selected_label=False,
         )
@@ -362,7 +384,9 @@ def predict_pick_players(
     _cache_candidate_features(db, cycle.id, team.id, pick, feature_rows)
 
     model_run = db.scalar(
-        select(MlModelRun).where(MlModelRun.model_family == "player_model").order_by(desc(MlModelRun.created_at))
+        select(MlModelRun)
+        .where(MlModelRun.model_family == "player_model")
+        .order_by(desc(MlModelRun.created_at))
     )
     probs: list[float]
     model_version: str
@@ -378,7 +402,9 @@ def predict_pick_players(
         )
         if cached is not None:
             probs = [float(item["probability"]) for item in cached["ranked_players"]]
-            cached_ranked = sorted(cached["ranked_players"], key=lambda x: x["probability"], reverse=True)
+            cached_ranked = sorted(
+                cached["ranked_players"], key=lambda x: x["probability"], reverse=True
+            )
             return PlayerPredictionResult(
                 team=team.abbreviation,
                 year=year,
@@ -398,7 +424,9 @@ def predict_pick_players(
                 ],
                 explanation_summary={
                     "candidate_count": len(cached_ranked),
-                    "top_need_position": max(need_map.items(), key=lambda kv: kv[1])[0] if need_map else "UNK",
+                    "top_need_position": (
+                        max(need_map.items(), key=lambda kv: kv[1])[0] if need_map else "UNK"
+                    ),
                     "board_scarcity_score": board_scarcity_score,
                 },
             )
@@ -410,9 +438,13 @@ def predict_pick_players(
         model_version = "player-heuristic-fallback-v1"
 
     ranked_items: list[PlayerPredictionItem] = []
-    for row, prob in sorted(zip(feature_rows, probs), key=lambda item: item[1], reverse=True):
+    for row, prob in sorted(
+        zip(feature_rows, probs, strict=False), key=lambda item: item[1], reverse=True
+    ):
         need_component = float(row["team_need_score"])
-        talent_component = (float(row["prospect_score"]) + float(row["superstar_potential_score"])) / 2.0
+        talent_component = (
+            float(row["prospect_score"]) + float(row["superstar_potential_score"])
+        ) / 2.0
         context_component = 1.0 - min(1.0, (float(row["rank_gap_from_best_available"]) / 32.0))
         superstar_override = compute_superstar_override_score(
             need_score=need_component,
@@ -439,7 +471,9 @@ def predict_pick_players(
         ranked_players=ranked_items,
         explanation_summary={
             "candidate_count": len(ranked_items),
-            "top_need_position": max(need_map.items(), key=lambda kv: kv[1])[0] if need_map else "UNK",
+            "top_need_position": (
+                max(need_map.items(), key=lambda kv: kv[1])[0] if need_map else "UNK"
+            ),
             "board_scarcity_score": board_scarcity_score,
         },
     )
@@ -497,7 +531,9 @@ def compute_superstar_override_score(
     weak_need_signal = max(0.0, 1.0 - min(1.0, need_score))
     elite_talent_signal = max(0.0, min(1.0, (talent_score - 0.65) / 0.35))
     model_confidence_signal = max(0.0, min(1.0, (predicted_probability - 0.2) / 0.8))
-    return max(0.0, min(1.0, weak_need_signal * elite_talent_signal * model_confidence_signal * 2.2))
+    return max(
+        0.0, min(1.0, weak_need_signal * elite_talent_signal * model_confidence_signal * 2.2)
+    )
 
 
 def compare_with_consensus(
@@ -514,9 +550,13 @@ def compare_with_consensus(
         raise ValueError("Team or year not found")
 
     model_run = db.scalar(
-        select(MlModelRun).where(MlModelRun.model_family == "player_model").order_by(desc(MlModelRun.created_at))
+        select(MlModelRun)
+        .where(MlModelRun.model_family == "player_model")
+        .order_by(desc(MlModelRun.created_at))
     )
-    model_version = model_run.model_version if model_run is not None else "player-heuristic-fallback-v1"
+    model_version = (
+        model_run.model_version if model_run is not None else "player-heuristic-fallback-v1"
+    )
     cmp_cache_type = _ml_cache_prediction_type("consensus_vs_ml", exclude_taken_normalized)
     cached = _read_prediction_cache(
         db,
@@ -539,7 +579,11 @@ def compare_with_consensus(
         )
 
     consensus = pick_consensus(
-        db, draft_year=year, overall_pick=pick, top_n=5, exclude_taken_normalized=exclude_taken_normalized
+        db,
+        draft_year=year,
+        overall_pick=pick,
+        top_n=5,
+        exclude_taken_normalized=exclude_taken_normalized,
     )
     consensus_top_players = [
         {
@@ -582,7 +626,9 @@ def compare_with_consensus(
         "consensus_only_count": len([n for n in consensus_names if n not in ml_names]),
         "ml_only_count": len([n for n in ml_names if n not in consensus_names]),
         "top_ml_player": top_ml.player_name if top_ml else "N/A",
-        "top_ml_superstar_override_score": float(top_ml.superstar_override_score) if top_ml else 0.0,
+        "top_ml_superstar_override_score": (
+            float(top_ml.superstar_override_score) if top_ml else 0.0
+        ),
         "need_component": grouped["need_component"],
         "talent_component": grouped["talent_component"],
         "context_component": grouped["context_component"],
@@ -653,7 +699,9 @@ def _cache_candidate_features(
                 prospect_score=float(row["prospect_score"]),
                 superstar_potential_score=float(row["superstar_potential_score"]),
                 positional_scarcity_score=float(row["positional_scarcity_score"]),
-                consensus_rank=(int(row["consensus_rank"]) if row["consensus_rank"] is not None else None),
+                consensus_rank=(
+                    int(row["consensus_rank"]) if row["consensus_rank"] is not None else None
+                ),
                 rank_gap_from_best_available=float(row["rank_gap_from_best_available"]),
                 rank_gap_within_position=float(row["rank_gap_within_position"]),
                 selected_label=bool(row["selected_label"]),
@@ -740,7 +788,9 @@ def _candidate_row_player_key(row: dict[str, object]) -> str:
     return normalize_player_name(name) or name.lower().strip()
 
 
-def _filter_candidates_by_board(payload: list[dict[str, object]], taken: frozenset[str]) -> list[dict[str, object]]:
+def _filter_candidates_by_board(
+    payload: list[dict[str, object]], taken: frozenset[str]
+) -> list[dict[str, object]]:
     if not taken:
         return list(payload)
     return [row for row in payload if _candidate_row_player_key(row) not in taken]
@@ -751,7 +801,10 @@ def _assign_best_available_ranks(payload: list[dict[str, object]]) -> None:
         return
     order = sorted(
         range(len(payload)),
-        key=lambda i: (payload[i].get("consensus_rank") is None, int(payload[i].get("consensus_rank") or 9999)),
+        key=lambda i: (
+            payload[i].get("consensus_rank") is None,
+            int(payload[i].get("consensus_rank") or 9999),
+        ),
     )
     for rank_pos, idx in enumerate(order, start=1):
         payload[idx]["best_available_rank"] = rank_pos

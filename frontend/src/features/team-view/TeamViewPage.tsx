@@ -117,8 +117,8 @@ export function TeamViewPage({ teamId }: { teamId: string }) {
   }, [players]);
 
   return (
-    <div className="space-y-4 p-4">
-      <h1 className="text-3xl font-bold">Team View: {team}</h1>
+    <div className="space-y-4">
+      <h1 className="text-2xl font-bold sm:text-3xl">Team View: {team}</h1>
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="rounded-full border border-amber-700/50 bg-amber-950/30 px-2 py-1 text-amber-200">
           Latest Completed Round: {draftRound}
@@ -144,20 +144,20 @@ export function TeamViewPage({ teamId }: { teamId: string }) {
           Regime Stability: {Number(org?.regime_stability_score ?? 0).toFixed(2)}
         </span>
       </div>
-      <div className="flex gap-3">
+      <div className="flex flex-wrap items-end gap-3">
         <label className="text-sm">
-          Year
+          <span className="block">Year</span>
           <input
-            className="ml-2 w-24 rounded border border-slate-700 bg-slate-900 px-2 py-1"
+            className="mt-1 w-24 rounded border border-slate-700 bg-slate-900 px-2 py-1"
             type="number"
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
           />
         </label>
         <label className="text-sm">
-          Pick
+          <span className="block">Pick</span>
           <input
-            className="ml-2 w-20 rounded border border-slate-700 bg-slate-900 px-2 py-1"
+            className="mt-1 w-20 rounded border border-slate-700 bg-slate-900 px-2 py-1"
             type="number"
             value={pick}
             onChange={(e) => setPick(Number(e.target.value))}
