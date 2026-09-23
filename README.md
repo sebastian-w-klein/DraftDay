@@ -301,6 +301,17 @@ Inference module:
 Artifacts:
 - `backend/artifacts/org_intelligence/`
 
+## Draft-Slot Predictor Research
+
+Measures which pre-draft traits are statistically significant predictors of where a
+prospect is drafted, using every NFL Combine invitee since 2000 (drafted and undrafted)
+plus 2015+ college production. Results feed the prospect/player models.
+
+- Findings: `docs/draft-slot-predictors.md`
+- Code: `backend/app/draft_slot/` (data joins, features, statistical tests, priors)
+- Generated tables and per-position priors: `backend/artifacts/draft_slot/`
+- Run: `pip install -e ".[research]"` then `python -m backend.app.draft_slot.cli`
+
 ## Next Build Steps
 
 - Add persistent alias lookup logic from `player_aliases` and `school_aliases`
